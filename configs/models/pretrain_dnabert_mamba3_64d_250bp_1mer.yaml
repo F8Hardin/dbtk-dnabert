@@ -1,0 +1,24 @@
+model:
+  class_path: dnabert.models.DnaBertForPretraining
+  config:
+    base:
+      max_length: 250
+      kmer: 1
+      kmer_stride: 1
+      normalize_sequences: true
+      embed_dim: 64
+      num_heads: 8
+      num_layers: 8
+      feedforward_dim: 256
+      activation: gelu
+      # --- block selection ---
+      layer_type: mamba3
+      mamba_d_state: 16
+      mamba_headdim: 64
+      mamba_expand: 2
+      mamba_chunk_size: 64
+      mamba_is_mimo: false
+      mamba_mimo_rank: 4
+      mamba_bidirectional: true
+    min_mask_ratio: 0.15
+    max_mask_ratio: 0.15
