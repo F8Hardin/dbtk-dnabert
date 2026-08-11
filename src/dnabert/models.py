@@ -43,6 +43,14 @@ class DnaBert(DbtkModel):
             feedforward_dim: int = 2048,
             activation: str = "gelu",
             max_length: int = 250,
+            layer_type: str = "transformer",
+            mamba_d_state: int = 128,
+            mamba_headdim: int = 64,
+            mamba_expand: int = 2,
+            mamba_chunk_size: int = 64,
+            mamba_is_mimo: bool = False,
+            mamba_mimo_rank: int = 4,
+            mamba_bidirectional: bool = True,
             **kwargs
         ):
             super().__init__(**kwargs)
@@ -55,6 +63,16 @@ class DnaBert(DbtkModel):
             self.feedforward_dim = feedforward_dim
             self.activation = activation
             self.max_length = max_length
+
+            # Mamba encoder setup -> set "layer_type: mamba3" in the model config
+            self.layer_type = layer_type
+            self.mamba_d_state = mamba_d_state
+            self.mamba_headdim = mamba_headdim
+            self.mamba_expand = mamba_expand
+            self.mamba_chunk_size = mamba_chunk_size
+            self.mamba_is_mimo = mamba_is_mimo
+            self.mamba_mimo_rank = mamba_mimo_rank
+            self.mamba_bidirectional = mamba_bidirectional
 
     config_class = Config
 
@@ -72,23 +90,50 @@ class DnaBert(DbtkModel):
         else:
             activation = self.config.activation
 
-        self.transformer = layers.TransformerEncoder(
-            layers.TransformerEncoderBlock(
-                mha=layers.RelativeMultiHeadAttention(
-                    embed_dim=self.config.embed_dim,
-                    num_heads=self.config.num_heads,
-                    max_length=self.config.max_length
-                ),
-                feedforward_dim=self.config.feedforward_dim,
-                feedforward_activation=activation
-            ),
-            num_layers=self.config.num_layers
-        )
+        self.transformer = self.build_encoder(activation)
 
         self.embeddings = nn.Embedding(
             len(self.tokenizer),
             self.config.embed_dim,
             padding_idx=self.tokenizer.vocab["[PAD]"]
+        )
+
+    def build_encoder(self, activation):
+
+        layer_type = getattr(self.config, "layer_type", "transformer")
+
+        if layer_type == "transformer":
+            return layers.TransformerEncoder(
+                layers.TransformerEncoderBlock(
+                    mha=layers.RelativeMultiHeadAttention(
+                        embed_dim=self.config.embed_dim,
+                        num_heads=self.config.num_heads,
+                        max_length=self.config.max_length
+                    ),
+                    feedforward_dim=self.config.feedforward_dim,
+                    feedforward_activation=activation
+                ),
+                num_layers=self.config.num_layers
+            )
+
+        if layer_type == "mamba3":
+            from .mamba_layers import BiMamba3Block, Mamba3Encoder
+            return Mamba3Encoder(
+                BiMamba3Block(
+                    embed_dim=self.config.embed_dim,
+                    d_state=self.config.mamba_d_state,
+                    headdim=self.config.mamba_headdim,
+                    expand=self.config.mamba_expand,
+                    chunk_size=self.config.mamba_chunk_size,
+                    is_mimo=self.config.mamba_is_mimo,
+                    mimo_rank=self.config.mamba_mimo_rank,
+                    bidirectional=self.config.mamba_bidirectional
+                ),
+                num_layers=self.config.num_layers
+            )
+
+        raise ValueError(
+            f"Unknown layer_type {layer_type!r}. Expected one of: 'transformer', 'mamba3'."
         )
 
     def forward(
