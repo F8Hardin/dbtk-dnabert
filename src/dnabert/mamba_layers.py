@@ -52,10 +52,15 @@ class BiMamba3Block(nn.Module):
 
 class Mamba3Encoder(nn.Module):
 
-    def __init__(self, encoder_layer: BiMamba3Block, num_layers: int):
+    def __init__(
+        self,
+        encoder_layer: BiMamba3Block,
+        num_layers: int,
+        final_layer_norm: bool = True
+    ):
         super().__init__()
         self.layers = nn.ModuleList([copy.deepcopy(encoder_layer) for _ in range(num_layers)])
-        self.norm = nn.LayerNorm(encoder_layer.embed_dim)
+        self.norm = nn.LayerNorm(encoder_layer.embed_dim) if final_layer_norm else nn.Identity()
 
     def forward(self, src: torch.Tensor, **kwargs):
         output = src

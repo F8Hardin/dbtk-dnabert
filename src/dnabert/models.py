@@ -51,6 +51,7 @@ class DnaBert(DbtkModel):
             mamba_is_mimo: bool = False,
             mamba_mimo_rank: int = 4,
             mamba_bidirectional: bool = True,
+            mamba_final_layer_norm: bool = True,
             **kwargs
         ):
             super().__init__(**kwargs)
@@ -73,6 +74,7 @@ class DnaBert(DbtkModel):
             self.mamba_is_mimo = mamba_is_mimo
             self.mamba_mimo_rank = mamba_mimo_rank
             self.mamba_bidirectional = mamba_bidirectional
+            self.mamba_final_layer_norm = mamba_final_layer_norm
 
     config_class = Config
 
@@ -129,7 +131,8 @@ class DnaBert(DbtkModel):
                     mimo_rank=self.config.mamba_mimo_rank,
                     bidirectional=self.config.mamba_bidirectional
                 ),
-                num_layers=self.config.num_layers
+                num_layers=self.config.num_layers,
+                final_layer_norm=self.config.mamba_final_layer_norm
             )
 
         raise ValueError(
