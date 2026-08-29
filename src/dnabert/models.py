@@ -119,9 +119,8 @@ class DnaBert(DbtkModel):
             )
 
         if layer_type == "mamba3":
-            from .mamba_layers import BiMamba3Block, Mamba3Encoder
-            return Mamba3Encoder(
-                BiMamba3Block(
+            return layers.Mamba3Encoder(
+                layers.BiMamba3Block(
                     embed_dim=self.config.embed_dim,
                     d_state=self.config.mamba_d_state,
                     headdim=self.config.mamba_headdim,
