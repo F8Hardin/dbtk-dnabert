@@ -43,6 +43,7 @@ class DnaBert(DbtkModel):
             feedforward_dim: int = 2048,
             activation: str = "gelu",
             max_length: int = 250,
+            head_embed_dim: Optional[int] = None,
             layer_type: str = "transformer",
             mamba_d_state: int = 128,
             mamba_headdim: int = 64,
@@ -64,6 +65,7 @@ class DnaBert(DbtkModel):
             self.feedforward_dim = feedforward_dim
             self.activation = activation
             self.max_length = max_length
+            self.head_embed_dim = head_embed_dim
 
             # Mamba encoder setup -> set "layer_type: mamba3" in the model config
             self.layer_type = layer_type
@@ -92,6 +94,19 @@ class DnaBert(DbtkModel):
         else:
             activation = self.config.activation
 
+        self.transformer = layers.TransformerEncoder(
+            layers.TransformerEncoderBlock(
+                mha=layers.RelativeMultiHeadAttention(
+                    embed_dim=self.config.embed_dim,
+                    num_heads=self.config.num_heads,
+                    max_length=self.config.max_length,
+                    head_embed_dim=self.config.head_embed_dim,
+                ),
+                feedforward_dim=self.config.feedforward_dim,
+                feedforward_activation=activation
+            ),
+            num_layers=self.config.num_layers
+        )
         self.transformer = self.build_encoder(activation)
 
         self.embeddings = nn.Embedding(
@@ -171,6 +186,8 @@ class DnaBertForPretraining(DbtkModel):
             base_class: Optional[BaseModelClassType[DnaBert]] = "dnabert.models.DnaBert",
             min_mask_ratio: float = 0.15,
             max_mask_ratio: float = 0.15,
+            lr: float = 1e-4,
+            warmup_ratio: float = 0.05,
             **kwargs
         ):
             super().__init__(**kwargs)
@@ -178,6 +195,8 @@ class DnaBertForPretraining(DbtkModel):
             self.base_class = base_class
             self.min_mask_ratio = min_mask_ratio
             self.max_mask_ratio = max_mask_ratio
+            self.lr = lr
+            self.warmup_ratio = warmup_ratio
 
     config_class = Config
     base_model_prefix = "base"
@@ -238,8 +257,19 @@ class DnaBertForPretraining(DbtkModel):
         return self._step("test", batch)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-4)
-        return optimizer
+        from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, SequentialLR
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.config.lr)
+        total_steps = self.trainer.estimated_stepping_batches
+        warmup_steps = max(1, int(self.config.warmup_ratio * total_steps))
+        scheduler = SequentialLR(
+            optimizer,
+            schedulers=[
+                LinearLR(optimizer, start_factor=1e-6, end_factor=1.0, total_iters=warmup_steps),
+                CosineAnnealingLR(optimizer, T_max=max(1, total_steps - warmup_steps), eta_min=0),
+            ],
+            milestones=[warmup_steps],
+        )
+        return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "interval": "step"}}
 
     def to_embedding_model(self) -> "DnaBertForEmbedding":
         """Return a DnaBertForEmbedding carrying this model's encoder weights."""
@@ -442,6 +472,8 @@ class DnaBertForTaxonomy(DbtkModel):
             leaf_paths: Optional[List[List[int]]] = None,
             taxonomy_db_path: Optional[str] = None,
             head_type: str = "topdown",
+            lr: float = 1e-4,
+            warmup_ratio: float = 0.05,
             **kwargs
         ):
             super().__init__(**kwargs)
@@ -452,6 +484,8 @@ class DnaBertForTaxonomy(DbtkModel):
             self.leaf_paths = leaf_paths or []
             self.taxonomy_db_path = taxonomy_db_path
             self.head_type = head_type
+            self.lr = lr
+            self.warmup_ratio = warmup_ratio
 
     config_class = Config
     base_model_prefix = "base"
@@ -561,7 +595,19 @@ class DnaBertForTaxonomy(DbtkModel):
         return seq_ids, pred_ids.cpu(), topk_ids.cpu(), topk_scores.cpu()
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=1e-4)
+        from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, SequentialLR
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.config.lr)
+        total_steps = self.trainer.estimated_stepping_batches
+        warmup_steps = max(1, int(self.config.warmup_ratio * total_steps))
+        scheduler = SequentialLR(
+            optimizer,
+            schedulers=[
+                LinearLR(optimizer, start_factor=1e-6, end_factor=1.0, total_iters=warmup_steps),
+                CosineAnnealingLR(optimizer, T_max=max(1, total_steps - warmup_steps), eta_min=0),
+            ],
+            milestones=[warmup_steps],
+        )
+        return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "interval": "step"}}
 
     def create_datamodule(self, sequences_path, batch_size: int = 256, num_workers: int = 0):
         from .datamodules import DnaBertSequencePredictDataModule
